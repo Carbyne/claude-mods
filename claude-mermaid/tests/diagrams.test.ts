@@ -281,3 +281,27 @@ describe('pickLayout', () => {
     expect(pickLayout({ error: 'x' }, base, 100)).toEqual({ error: 'x' })
   })
 })
+
+describe('wide glyphs', () => {
+  // CJK and fullwidth glyphs take two terminal columns
+  const columnsOf = (text: string) =>
+    [...text].reduce((n, ch) => n + (/[ᄀ-ᅟ⺀-〾ぁ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch) ? 2 : 1), 0)
+  const CJK = 'flowchart TD\n  A["开始：读取数据"] --> B{"是否继续？"}\n  B --> C["结束"]'
+
+  test('every printed line is as wide on screen as the layout made it', () => {
+    const lines = linesOf(CJK)
+    for (const line of lines) expect(columnsOf(ansiLineOf(line, null))).toBe([...plainOf(line)].length)
+  })
+
+  test('the printed art keeps the labels and none of the padding', () => {
+    const printed = linesOf(CJK).map(line => ansiLineOf(line, null)).join('\n')
+    expect(printed).toContain('开始：读取数据')
+    expect(printed).toContain('是否继续？')
+    expect(printed).not.toContain('')
+  })
+
+  test('box borders line up around a wide label', () => {
+    const printed = linesOf('flowchart LR\n  A["中文标签"]').map(line => ansiLineOf(line, null))
+    expect(new Set(printed.map(columnsOf)).size).toBe(1)
+  })
+})
