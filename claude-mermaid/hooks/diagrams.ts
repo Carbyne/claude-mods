@@ -166,6 +166,13 @@ const segmentsOf = (line: string): Segment[] => {
   return out
 }
 
+// wide (CJK/fullwidth) glyphs take two terminal columns but the renderer counts one:
+// pad each with a placeholder before layout, drop the placeholder when printing
+const WIDE = /([\u1100-\u115F\u2E80-\u303E\u3041-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6])/g
+const PAD = '\uE000'
+const widen = (source: string): string => source.replace(WIDE, `$1${PAD}`)
+const unpad = (text: string): string => text.split(PAD).join('')
+
 export const plainOf = (line: readonly Segment[]): string => line.map(s => s.text).join('')
 
 export const renderOf = (source: string, useAscii: boolean): Rendered => {
@@ -173,7 +180,7 @@ export const renderOf = (source: string, useAscii: boolean): Rendered => {
   if (!DRAWN_KINDS.has(kind)) return { error: `${kind} diagrams are not drawn yet` }
   if (source.length > MAX_SOURCE_CHARS) return { error: `too big to draw (${source.length} characters)` }
   try {
-    const art = renderMermaidAscii(source, { useAscii, colorMode: 'truecolor', theme: ROLE_THEME })
+    const art = renderMermaidAscii(widen(source), { useAscii, colorMode: 'truecolor', theme: ROLE_THEME })
     const lines = art.split('\n').map(line => segmentsOf(line.replace(/ +$/, '')))
     while (lines.length > 0 && lines[lines.length - 1]?.length === 0) lines.pop()
     while (lines.length > 0 && lines[0]?.length === 0) lines.shift()
@@ -222,7 +229,7 @@ export const ansiLineOf = (line: readonly Segment[], palette: Readonly<Record<Ro
   line
     .map(({ text, role }) => {
       const code = role && palette ? palette[role] : ''
-      return code ? `\x1b[${code}m${text}\x1b[0m` : text
+      return code ? `\x1b[${code}m${unpad(text)}\x1b[0m` : unpad(text)
     })
     .join('')
 
