@@ -73,7 +73,7 @@ const TURN_MS = 90_000
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-describe.skipIf(!ready)('claude-queue in Claude Code', () => {
+describe.skipIf(!ready)('prompt-queue in Claude Code', () => {
   let s: Session
 
   beforeAll(async () => {
@@ -165,7 +165,7 @@ describe.skipIf(!ready)('claude-queue in Claude Code', () => {
     // command (its output is tall enough to scroll its own row off, so the
     // engine's log is what says so), and the line behind it went on out
     await s.waitFor('AFTER-COMMAND', TURN_MS)
-    expect(readFileSync(s.debugLog, 'utf8')).toContain('$.command.run (claude-queue): 8 chars queued')
+    expect(readFileSync(s.debugLog, 'utf8')).toContain('$.command.run (prompt-queue): 8 chars queued')
     expect(rowOf('AFTER-COMMAND')).toBeGreaterThan(rows().findIndex(line => line.includes('tokens')))
     expect(plain()).not.toContain('did not go out')
     expect(plain()).not.toContain('did not run')
@@ -327,13 +327,13 @@ describe.skipIf(!ready)('claude-queue in Claude Code', () => {
   test('the band the hook drew validated every time', () => {
     const log = readFileSync(s.debugLog, 'utf8')
     expect(log).not.toContain('does not validate')
-    expect(log).toMatch(/hooks module claude-queue.* ui\.render settled/)
+    expect(log).toMatch(/hooks module prompt-queue.* ui\.render settled/)
   })
 })
 
 // mouse reports only reach the band under the fullscreen renderer, so the
 // click has a session of its own
-describe.skipIf(!ready)('claude-queue under the mouse', () => {
+describe.skipIf(!ready)('prompt-queue under the mouse', () => {
   let s: Session
 
   beforeAll(async () => {
@@ -394,16 +394,16 @@ describe.skipIf(!ready)('claude-queue under the mouse', () => {
 
 // the `joined` option, which needs a settings.json of its own: the whole
 // stack leaves as one prompt instead of a turn each
-describe.skipIf(!ready)('claude-queue with joined on', () => {
+describe.skipIf(!ready)('prompt-queue with joined on', () => {
   let s: Session
   let dir: string
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'claude-queue-'))
+    dir = mkdtempSync(join(tmpdir(), 'prompt-queue-'))
     const settings = join(dir, 'settings.json')
     // a --plugin-dir plugin is keyed by its manifest name, or that name @inline
     const options = { options: { joined: true } }
-    writeFileSync(settings, JSON.stringify({ pluginConfigs: { 'claude-queue': options, 'claude-queue@inline': options } }))
+    writeFileSync(settings, JSON.stringify({ pluginConfigs: { 'prompt-queue': options, 'prompt-queue@inline': options } }))
     s = await startSession(
       [
         { prompt: 'queue longg token', reply: long('GOLF') },
@@ -429,19 +429,19 @@ describe.skipIf(!ready)('claude-queue with joined on', () => {
     expect(screen).toContain('queue join-one token')
     expect(screen).toContain('queue join-two token')
     // one prompt, not two
-    expect(screen.split('The claude-queue plugin sent a message').length - 1).toBe(1)
+    expect(screen.split('The prompt-queue plugin sent a message').length - 1).toBe(1)
   }, TURN_MS)
 })
 
 // a turn that leaves work running in the background is a pause, not an end:
 // the stack waits for the notification that wakes the session, and drains
 // once that turn ends with nothing left running
-describe.skipIf(!ready)('claude-queue over background work', () => {
+describe.skipIf(!ready)('prompt-queue over background work', () => {
   let s: Session
   let dir: string
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'claude-queue-'))
+    dir = mkdtempSync(join(tmpdir(), 'prompt-queue-'))
     const settings = join(dir, 'settings.json')
     // not `auto`: its classifier cannot answer against the mock, and blocks the spawn
     writeFileSync(settings, JSON.stringify({ permissions: { defaultMode: 'acceptEdits', allow: ['Bash(sleep:*)', 'Agent'] } }))

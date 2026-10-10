@@ -1,4 +1,4 @@
-# claude-queue
+# prompt-queue
 
 `/q <text>` while Claude is working: the text does not land in the running
 turn. It waits in a stack drawn above the prompt box and goes out once the
@@ -62,15 +62,18 @@ variable below and the API can change between releases.
    claude --plugin-dir claude-queue
    ```
 
-   Or install it from the repository's marketplace, `claude-mods`:
+   Or install it from the repository's marketplace, `gal-mods`:
 
    ```sh
    claude plugin marketplace add galElmalah/claude-mods
-   claude plugin install claude-queue@claude-mods
+   claude plugin install prompt-queue@gal-mods
    ```
 
 3. Ask Claude for something slow, then type `/q` and your next message and
    press Enter. It appears in the band instead of in the turn.
+
+Upgrading from `claude-queue@claude-mods`? Follow the
+[migration instructions](../README.md#migrating-from-the-old-names).
 
 ## Use
 
@@ -121,11 +124,13 @@ there.
 
 `joined` (off by default) sends the whole stack as one prompt when the turn
 ends, its entries separated by a blank line, instead of a turn each. Set it
-with `/plugin configure claude-queue`, or in settings.json:
+with `/plugin configure prompt-queue`, or in settings.json:
 
 ```json
-{ "pluginConfigs": { "claude-queue": { "options": { "joined": true } } } }
+{ "pluginConfigs": { "prompt-queue@gal-mods": { "options": { "joined": true } } } }
 ```
+
+For a local `--plugin-dir` session, use `prompt-queue` as the configuration key.
 
 ## How it works
 
@@ -180,7 +185,7 @@ with `/plugin configure claude-queue`, or in settings.json:
 ## Limits
 
 - **A held prompt arrives as the plugin's, not as yours.** The engine frames
-  every `$.prompt.submit` as *"The claude-queue plugin sent a message: …"*,
+  every `$.prompt.submit` as *"The prompt-queue plugin sent a message: …"*,
   says so to the model, and draws the framing in the transcript row. The
   text is yours and reaches the model whole; the framing is the engine's,
   and the plugin cannot redraw that row either — the engine skips a plugin's
