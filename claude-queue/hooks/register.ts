@@ -227,7 +227,7 @@ const commitEdit = ($: EngineInterface, value: string) => {
 
 /** what the model reads beside the tool result, the message framed as the user's */
 const frame = (entry: Entry) =>
-  `The user sent this message while you were working (delivered by the claude-queue plugin as a steering message, the way a mid-turn message normally arrives). Address it as you continue:\n\n${entry.text}`
+  `The user sent this message while you were working (delivered by the prompt-queue plugin as a steering message, the way a mid-turn message normally arrives). Address it as you continue:\n\n${entry.text}`
 
 const removeSteer = (id: string) => {
   const index = steer.findIndex(entry => entry.id === id)
@@ -389,7 +389,7 @@ export const register: Register = (on, options) => {
     await $.command
       .register({
         name: COMMAND,
-        description: 'Hold a prompt until the turn ends: /q <text>; list, up/down/mv, now, rm, edit, clear, send, status (claude-queue)',
+        description: 'Hold a prompt until the turn ends: /q <text>; list, up/down/mv, now, rm, edit, clear, send, status (prompt-queue)',
         argumentHint: '[<text> | up <n> | down <n> | mv <n> <m> | now <n> | rm <n> | edit <n> | clear | send | status]',
         // the queue is worked on while a turn runs, which is the only time it fills
         immediate: true,

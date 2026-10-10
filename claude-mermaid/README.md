@@ -1,4 +1,4 @@
-# claude-mermaid
+# mermaid-draw
 
 Mermaid diagrams in Claude Code. Every ```` ```mermaid ```` block Claude writes
 is drawn as box art, in colour, right where the fence was in the transcript.
@@ -53,14 +53,17 @@ variable below and the API can change between releases.
    claude --plugin-dir claude-mermaid
    ```
 
-   Or install it from the repo's marketplace, `claude-mods`:
+   Or install it from the repo's marketplace, `gal-mods`:
 
    ```sh
    claude plugin marketplace add galElmalah/claude-mods
-   claude plugin install claude-mermaid@claude-mods
+   claude plugin install mermaid-draw@gal-mods
    ```
 
 3. Ask Claude for a diagram. It is drawn in the reply.
+
+Upgrading from `claude-mermaid@claude-mods`? Follow the
+[migration instructions](../README.md#migrating-from-the-old-names).
 
 ## Use
 
