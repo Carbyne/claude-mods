@@ -1,14 +1,15 @@
 import type { Register } from 'claude-code'
 import {
   TEXT_PALETTE,
+  ansiLineOf,
   fitLines,
   inlineTextOf,
   leftToRightOf,
   mermaidBlocksOf,
   partsOf,
   pickLayout,
-  plainOf,
   renderOf,
+  unpad,
   withoutPseudoStates,
   type MermaidBlock,
   type Rendered,
@@ -98,7 +99,8 @@ export const register: Register = on => {
         const { Box, Text, Markdown } = $.ui.resolve(e)
         const spanOf = (segment: Segment) => {
           const style = segment.role ? TEXT_PALETTE[segment.role] : {}
-          return style.color || style.dimColor ? Text({ ...style, children: segment.text }) : segment.text
+          const text = unpad(segment.text)
+          return style.color || style.dimColor ? Text({ ...style, children: text }) : text
         }
         const body = parts.map(part =>
           part.kind === 'markdown'
@@ -120,7 +122,7 @@ export const register: Register = on => {
     }
 
     const plain = artOf(INLINE_MARGIN)
-    const text = inlineTextOf(e.props.text, blocks, block => plain(block)?.map(plainOf) ?? null)
+    const text = inlineTextOf(e.props.text, blocks, block => plain(block)?.map(line => ansiLineOf(line, null)) ?? null)
     return next({ ...e, props: { ...e.props, text } })
   })
 

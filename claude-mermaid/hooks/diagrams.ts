@@ -171,7 +171,7 @@ const segmentsOf = (line: string): Segment[] => {
 const WIDE = /([\u1100-\u115F\u2E80-\u303E\u3041-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6])/g
 const PAD = '\uE000'
 const widen = (source: string): string => source.replace(WIDE, `$1${PAD}`)
-const unpad = (text: string): string => text.split(PAD).join('')
+export const unpad = (text: string): string => text.split(PAD).join('')
 
 export const plainOf = (line: readonly Segment[]): string => line.map(s => s.text).join('')
 

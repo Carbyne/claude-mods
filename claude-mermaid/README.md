@@ -107,6 +107,7 @@ plugin's store across sessions.
 npm install                 # esbuild, beautiful-mermaid, aimock, bun types
 npm run build:vendor        # rebuilds hooks/vendor/mermaid-ascii.js
 npm test                    # unit tests of hooks/diagrams.ts
+npm run test:plugin         # render-hook tests in Claude Code's plugin test kit
 npm run test:e2e            # the plugin inside a real Claude Code (below)
 npm run typecheck           # against ../.claude/types (run /plugin-types first)
 npm run validate            # what the engine sees the module hook and call
@@ -115,6 +116,11 @@ npm run validate            # what the engine sees the module hook and call
 Typechecking needs the declarations of your Claude Code build: open a
 session in the repository root with function hooks on and run `/plugin-types`,
 which writes the git-ignored `.claude/types/`.
+
+The plugin test kit and Bun use different runtimes. `test:plugin` copies the
+hooks and kit tests into a temporary plugin folder so Claude's runner does
+not try to load the Bun tests. `npm run test:all` runs both suites and the
+end-to-end tests with their respective runners.
 
 ### End-to-end tests
 
