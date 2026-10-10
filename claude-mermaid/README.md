@@ -78,9 +78,12 @@ plugin's store across sessions.
 ## How it works
 
 - `hooks/register.ts` is the hooks module. It hooks `ui.render` of
-  `AssistantMessage` to swap each closed mermaid fence for a text fence of its
-  art (ANSI-coloured, so the transcript's code block draws the colours), and
-  `command.run` for `/mermaid`.
+  `AssistantMessage`: with colour on, on the terminal, it returns a tree of its
+  own (`Markdown` for the prose, one `Text` per diagram line, the colours as
+  props on its spans), since a rewritten `props.text` may carry no escape
+  sequence from Claude Code 2.1.287 on; otherwise it swaps each closed mermaid
+  fence for a text fence of plain art. It also hooks `command.run` for
+  `/mermaid`.
 - `hooks/diagrams.ts` is the pure part: finding fences, rendering, choosing
   the sideways layout (kept only when every word of the top-down render
   survives, since the renderer can overwrite the label of an edge that runs
@@ -104,6 +107,7 @@ plugin's store across sessions.
 npm install                 # esbuild, beautiful-mermaid, aimock, bun types
 npm run build:vendor        # rebuilds hooks/vendor/mermaid-ascii.js
 npm test                    # unit tests of hooks/diagrams.ts
+npm run test:plugin         # render-hook tests in Claude Code's plugin test kit
 npm run test:e2e            # the plugin inside a real Claude Code (below)
 npm run typecheck           # against ../.claude/types (run /plugin-types first)
 npm run validate            # what the engine sees the module hook and call
@@ -112,6 +116,11 @@ npm run validate            # what the engine sees the module hook and call
 Typechecking needs the declarations of your Claude Code build: open a
 session in the repository root with function hooks on and run `/plugin-types`,
 which writes the git-ignored `.claude/types/`.
+
+The plugin test kit and Bun use different runtimes. `test:plugin` copies the
+hooks and kit tests into a temporary plugin folder so Claude's runner does
+not try to load the Bun tests. `npm run test:all` runs both suites and the
+end-to-end tests with their respective runners.
 
 ### End-to-end tests
 
@@ -135,8 +144,9 @@ Claude with `--debug-file /tmp/mermaid.log` to see what the engine refused.
   journey, timeline, quadrant, C4, …) keep their fence.
 - Art wider than the transcript is cut at the right with `…` and a line
   saying by how much; make the terminal wider.
-- Colours ride on ANSI escapes inside the drawn code block; a surface that
-  strips them (desktop, mobile) shows plain art.
+- Colours are drawn on the terminal alone; desktop, VS Code and mobile show
+  plain art. A reply whose prose between diagrams runs past 10000 characters
+  (one `Markdown` element's cap) is drawn plain too.
 
 ## License
 

@@ -7,8 +7,9 @@
   "scripts": {
     "build:vendor": "node scripts/build-vendor.mjs",
     "test": "bun test tests/diagrams.test.ts",
+    "test:plugin": "node scripts/test-plugin.mjs",
     "test:e2e": "bun test tests/e2e",
-    "test:all": "bun test",
+    "test:all": "npm test && npm run test:plugin && npm run test:e2e",
     "typecheck": "bunx -p typescript tsc -p . && bunx -p typescript tsc -p tsconfig.test.json",
     "validate": "claude plugin validate .claude-plugin/plugin.json && claude plugin validate ."
   },
