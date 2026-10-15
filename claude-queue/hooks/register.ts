@@ -288,14 +288,29 @@ const isEcho = (raw: string): boolean => {
   return stack.some(entry => entry.at > Date.now() - ECHO_WINDOW_MS && entry.text.trim() === line)
 }
 
-// The typed `/q <text>` row is stored as a prompt line of the conversation,
-// so its content sits in history from the moment it is queued. Rewrite that
-// row while it is still held: the text shows nothing until the stack drains
-// and the plugin's own submit puts it in the transcript, where it belongs.
-const isHeldRow = (message: unknown): message is { role?: string; content?: unknown } => {
-  const m = message as { role?: string; content?: unknown }
-  if (!m || m.role !== 'user' || typeof m.content !== 'string') return false
-  const line = m.content.trim()
+// The typed `/q <text>` row is stored as a conversation line, so its content
+// sits in history from the moment it is queued. session.append rewrites text
+// blocks of a stored user row before it is kept: while the entry waits in
+// the stack, the row is stored without the text. The text enters the
+// transcript once, through the plugin's own submit at idle.
+//
+// A `/q <text>` typed mid-turn is additionally queued by the engine as a
+// `queued_command` attachment the model reads inside the running turn (the
+// transcript's "Read by Claude" chip is that delivery). prompt.attachment
+// takes its text out of the request while the entry waits, so the model
+// reads the queue's copy once, at idle — the only copy.
+
+/** containment match for the attachment form: its text carries the engine's
+    framing around the command, not the bare line */
+const attachesHeld = (raw: string): boolean =>
+  stack.some(entry => {
+    const want = entry.text.trim()
+    return want !== '' && entry.at > Date.now() - ECHO_WINDOW_MS && raw.includes(want)
+  })
+
+/** the bare typed-command form, as stored on a user row or re-queued prompt */
+const heldCommandRow = (raw: string): boolean => {
+  const line = raw.trim()
   const stripped = line.replace(/^\/q\b/, '').trim()
   return stripped !== line && stripped !== '' && stack.some(entry => entry.text.trim() === stripped)
 }
@@ -577,18 +592,6 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // A background task just reported: the cached answer is stale, and the
-  // wake-turn's own end is what drains the stack. An early-access build
-  // without this event must not take the whole mod down with it.
-  try {
-    on('session.receive', async ($, e, next) => {
-      if ((e as { origin?: { kind?: string } }).origin?.kind === 'task-notification') busyCache = null
-      return next(e)
-    })
-  } catch {
-    // no task-notification signal on this build: caches still clear at turns
-  }
-
   // The steer route: a mid-turn message rides the next tool result's context,
   // which is how the engine delivers one. The object `next` gave us goes back
   // whole, `ref` and all, so the tool's own messages are used verbatim.
@@ -614,24 +617,44 @@ export const register: Register = (on, options) => {
     return context.length === (r.context?.length ?? 0) ? r : { ...r, context }
   })
 
-  // One row per stored conversation line: mask a held /q command while its
-  // entry waits in the stack. Display and storage only; the model never read
-  // this row anyway (the command was consumed by command.run, and the echo
-  // guard drops it if the engine ever queues it as a prompt).
+  // Stored rows: mask the typed-command row while its entry waits. content
+  // is API blocks (text ones are rewritable; the row's type, not role, names
+  // the party), matched against the stack by the bare typed-command form.
   on('session.append', async ($, e, next) => {
-    const m = e.message as { role?: string; content?: unknown }
-    if (isHeldRow(e.message)) {
-      return next({ ...e, message: { ...m, content: '/q ⏳ held · appears when sent' } })
-    }
+    const m = e.message as { type?: string; content?: Array<{ type?: string; text?: unknown }> }
+    if (m?.type !== 'user' || !Array.isArray(m.content)) return next(e)
+    const line = m.content.find(b => b?.type === 'text' && typeof b.text === 'string')?.text ?? ''
+    if (!heldCommandRow(line)) return next(e)
+    return next({
+      ...e,
+      message: {
+        ...m,
+        content: m.content.map(b =>
+          b?.type === 'text' && typeof b.text === 'string' ? { ...b, text: '/q ⏳ held · appears when sent' } : b,
+        ),
+      },
+    })
+  })
+
+  // The model-facing half: a queued_command attachment carrying a held
+  // entry's text is left out of the request. Plain queued messages and the
+  // plugin's own steering context ride other types and pass untouched.
+  on('prompt.attachment', { type: 'queued_command' }, async ($, e, next) => {
+    if (attachesHeld(e.text as string)) return { text: null }
     return next(e)
   })
 
   // Enter is left to the engine. Only the turn id is read off it: a reload
-  // mid-turn missed turn.start, and this Enter carries the id it lost. The
-  // one exception is a queued echo of a held `/q` line, dropped so the stack
-  // drains once, at idle, instead of the raw text arriving early as well.
+  // mid-turn missed turn.start, and this Enter carries the id it lost. A
+  // task-notification origin (a background job waking the session) clears the
+  // probe cache, and a plugin-origin submission is never an echo: the engine
+  // stamps origin.kind, so the guard reads it instead of guessing.
   on('prompt.submit', async ($, e, next) => {
-    if (isEcho((e as { text?: string }).text ?? '')) return { drop: 'prompt-queue' }
+    const kind = (e as { origin?: { kind?: string } }).origin?.kind
+    if (kind === 'task-notification') busyCache = null
+    if (kind !== 'plugin' && (isEcho((e as { text?: string }).text ?? '') || heldCommandRow((e as { text?: string }).text ?? ''))) {
+      return { drop: 'prompt-queue' }
+    }
     if (e.turnId) turnId = e.turnId
     return next(e)
   })
