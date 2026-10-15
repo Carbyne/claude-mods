@@ -315,6 +315,26 @@ const heldCommandRow = (raw: string): boolean => {
   return stripped !== line && stripped !== '' && stack.some(entry => entry.text.trim() === stripped)
 }
 
+/** The transcript keeps a typed command as a user-role row the model reads,
+    framed as <command-name>/q</command-name>...<command-args>TEXT</command-args>
+    (confirmed from the session's JSONL; the queue-operation row beside it is
+    the engine's replay record and stays untouched). Pull the args out of
+    either form and see if they name a held entry. */
+const queuedArgs = (text: string): string | undefined => {
+  const framed = /<command-name>\/?q<\/command-name>[\s\S]*?<command-args>([\s\S]*?)<\/command-args>/.exec(text)
+  if (framed) return framed[1]!.trim() || undefined
+  const line = text.trim()
+  const stripped = line.replace(/^\/q\b/, '').trim()
+  return stripped !== line && stripped !== '' ? stripped : undefined
+}
+
+const MASK_ROW = '/q ⏳ held · appears when sent'
+
+const rowHoldsEntry = (text: string): boolean => {
+  const args = queuedArgs(text)
+  return args !== undefined && stack.some(entry => entry.text.trim() === args)
+}
+
 // out of the stack only once the box has it: a fill the box turned down (a
 // dialog holds the keys) would otherwise lose the text
 const fillFrom = ($: EngineInterface, entry: Entry) =>
@@ -617,23 +637,28 @@ export const register: Register = (on, options) => {
     return context.length === (r.context?.length ?? 0) ? r : { ...r, context }
   })
 
-  // Stored rows: mask the typed-command row while its entry waits. content
-  // is API blocks (text ones are rewritable; the row's type, not role, names
-  // the party), matched against the stack by the bare typed-command form.
+  // Stored rows: mask the typed-command row while its entry waits. The row
+  // arrives with type 'user' (a role the request carries: this is how the
+  // model came to quote a held prompt verbatim while never being "given" it)
+  // and content either as one string or as API blocks; both are rewritten
+  // when their command-args name a held entry. Other rows pass untouched.
   on('session.append', async ($, e, next) => {
-    const m = e.message as { type?: string; content?: Array<{ type?: string; text?: unknown }> }
-    if (m?.type !== 'user' || !Array.isArray(m.content)) return next(e)
-    const line = m.content.find(b => b?.type === 'text' && typeof b.text === 'string')?.text ?? ''
-    if (!heldCommandRow(line)) return next(e)
-    return next({
-      ...e,
-      message: {
-        ...m,
-        content: m.content.map(b =>
-          b?.type === 'text' && typeof b.text === 'string' ? { ...b, text: '/q ⏳ held · appears when sent' } : b,
-        ),
-      },
-    })
+    const m = e.message as { type?: string; content?: unknown }
+    if (m?.type !== 'user') return next(e)
+    if (typeof m.content === 'string') {
+      return rowHoldsEntry(m.content) ? next({ ...e, message: { ...m, content: MASK_ROW } }) : next(e)
+    }
+    if (Array.isArray(m.content)) {
+      const blocks = m.content as Array<{ type?: string; text?: unknown }>
+      const hit = (b: { type?: string; text?: unknown }): boolean =>
+        b?.type === 'text' && typeof b.text === 'string' && rowHoldsEntry(b.text)
+      if (!blocks.some(hit)) return next(e)
+      return next({
+        ...e,
+        message: { ...m, content: blocks.map(b => (hit(b) ? { ...b, text: MASK_ROW } : b)) },
+      })
+    }
+    return next(e)
   })
 
   // The model-facing half: a queued_command attachment carrying a held
