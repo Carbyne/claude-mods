@@ -108,6 +108,17 @@ const statusLine = () =>
 
 const indexOfId = (id: string) => stack.findIndex(entry => entry.id === id)
 
+// A hot reload re-evaluates this module, and module-scope state dies with the
+// old copy: the stack came back empty, silently. $.store survives reloads, so
+// every mutation mirrors (stack, steer) under the session's own key, and
+// session.start (which refires on reload) hydrates them back. Keyed per
+// session, because the store is shared machine-wide and two Code tabs
+// restoring one queue would each send its copies.
+const mark = ($: EngineInterface) => {
+  if (queueKey) void $.store.set(queueKey, { stack, steer, savedAt: Date.now() }).catch(() => {})
+  $.ui.invalidate('ui.render')
+}
+
 const removeAt = (index: number): Entry | undefined => {
   const [gone] = stack.splice(index, 1)
   return gone
@@ -154,13 +165,13 @@ const flush = ($: EngineInterface) => {
   const wait = GAP_MS - (Date.now() - sentAt)
   if (wait > 0) {
     pending = $.clock.after(wait, () => flush($))
-    $.ui.invalidate('ui.render')
+    mark($)
     return
   }
   const going = takeDue()
   sentAt = Date.now()
   if (editing && indexOfId(editing.id) < 0) editing = null
-  $.ui.invalidate('ui.render')
+  mark($)
   const run = slash(going[0]!.text)
   if (run) {
     $.command
@@ -184,7 +195,7 @@ const flush = ($: EngineInterface) => {
       // a refusal is usually the gap: try once it has passed; several in a row
       // (the session's cap on a plugin's prompts) leave the stack to /q send
       if (++failures < RETRIES) pending = $.clock.after(GAP_MS, () => flush($))
-      $.ui.invalidate('ui.render')
+      mark($)
     })
 }
 
@@ -228,7 +239,7 @@ const gate = async ($: EngineInterface) => {
   }
   if (!lastUnknown) unknowns = 0
   pending = $.clock.after(PROBE_RETRY_MS, () => gate($))
-  $.ui.invalidate('ui.render')
+  mark($)
 }
 
 const backgroundRunning = async ($: EngineInterface): Promise<boolean> => {
@@ -266,6 +277,10 @@ const classifyTasks = (text: string): boolean | undefined => {
 
 /** how old a held entry may be for its bare text to read as a queued echo */
 const ECHO_WINDOW_MS = 5 * 60_000
+/** how long a persisted queue survives its session before being swept */
+const QUEUE_TTL_MS = 24 * 3_600_000
+/** this session's store key; unset until session.start reads the id back */
+let queueKey: string | undefined
 
 // Some surfaces (seen on the desktop Code tab) queue the typed `/q <text>`
 // line into the engine's own mid-turn message queue as well as running the
@@ -344,7 +359,7 @@ const fillFrom = ($: EngineInterface, entry: Entry) =>
       if (!isFilled) return false
       // the fill's round trip is long enough for a drain to have taken it
       const kept = removeId(entry.id) !== undefined
-      $.ui.invalidate('ui.render')
+      mark($)
       return kept
     })
     .catch(() => false)
@@ -355,7 +370,7 @@ const fillFrom = ($: EngineInterface, entry: Entry) =>
 const startEdit = ($: EngineInterface, entry: Entry) => {
   editing = { id: entry.id, text: head(entry.text) }
   editFocused = false
-  $.ui.invalidate('ui.render')
+  mark($)
   takeField($, entry, FOCUS_TRIES)
 }
 
@@ -373,7 +388,7 @@ const takeField = ($: EngineInterface, entry: Entry, tries: number) => {
     // the ordinary case (a click does not give the band the keyboard): the
     // fill says what happened by itself, so nothing is written to the transcript
     editing = null
-    $.ui.invalidate('ui.render')
+    mark($)
     void fillFrom($, entry)
   })
 }
@@ -381,7 +396,7 @@ const takeField = ($: EngineInterface, entry: Entry, tries: number) => {
 const commitEdit = ($: EngineInterface, value: string) => {
   const open = editing
   editing = null
-  $.ui.invalidate('ui.render')
+  mark($)
   if (!open) return
   const entry = stack[indexOfId(open.id)]
   // an emptied field is a cancel: the entry keeps the text it had
@@ -422,7 +437,7 @@ const bandOf = ($: EngineInterface, e: RenderInput<'AbovePrompt'> & { surface: '
   const steerRoom = Math.max(8, e.props.bodyColumns - BORDER - gutter - STEER_CONTROLS)
   const press = (run: () => void) => () => {
     run()
-    $.ui.invalidate('ui.render')
+    mark($)
   }
   // the open row's own number is the only mark a field being typed in gets
   const number = (index: number, open = false) => {
@@ -553,6 +568,29 @@ export const register: Register = (on, options) => {
     // does not hang on a /tasks answer the classifier has never seen
     stopAt = Date.now()
     stopBlind = false
+    // bring the queue back from the store after a hot reload, and sweep
+    // copies left behind by sessions that ended without draining
+    try {
+      const sid = await $.session.id()
+      queueKey = `queue:${sid}`
+      const saved = (await $.store.get(queueKey)) as { stack?: unknown; steer?: unknown } | undefined
+      const ok = (x: unknown): x is Entry[] =>
+        Array.isArray(x) && x.every(en => en && typeof (en as Entry).id === 'string' && typeof (en as Entry).text === 'string')
+      if (saved && ok(saved.stack) && ok(saved.steer ?? [])) {
+        stack = saved.stack.map(en => ({ id: en.id, text: en.text, at: Number((en as { at?: unknown }).at) || Date.now() }))
+        steer = ((saved.steer ?? []) as Entry[]).map(en => ({ id: en.id, text: en.text, at: Date.now() }))
+        counter = Math.max(0, ...stack.map(en => Number(/^e(\d+)$/.exec(en.id)?.[1] ?? 0)), ...steer.map(en => Number(/^e(\d+)$/.exec(en.id)?.[1] ?? 0)))
+        if (stack.length + steer.length > 0) $.ui.log('queue: restored ' + stack.length + ' held · ' + steer.length + ' steered after reload')
+      }
+      const keys = await $.store.keys()
+      for (const k of keys) {
+        if (!k.startsWith('queue:') || k === queueKey) continue
+        const v = (await $.store.get(k)) as { savedAt?: number } | undefined
+        if (!v || typeof v.savedAt !== 'number' || Date.now() - v.savedAt > QUEUE_TTL_MS) await $.store.delete(k)
+      }
+    } catch {
+      queueKey = undefined // no persistence this session: the queue still works in memory
+    }
     await $.command
       .register({
         name: COMMAND,
@@ -570,7 +608,7 @@ export const register: Register = (on, options) => {
     busyCache = null
     // the band reads the running turn: without this it keeps saying `sending`,
     // [ send ] and all, over the turn the queue itself started
-    if (stack.length > 0) $.ui.invalidate('ui.render')
+    if (stack.length > 0) mark($)
     return next(e)
   })
 
@@ -587,7 +625,7 @@ export const register: Register = (on, options) => {
     // a turn that left work running in the background is a pause, not an end:
     // the notification that wakes it starts the turn whose end drains
     if (inFlight > 0) {
-      $.ui.invalidate('ui.render')
+      mark($)
       return r
     }
     // every ending drains, an Esc included: what was typed was asked for
@@ -633,7 +671,7 @@ export const register: Register = (on, options) => {
       $.ui.log(`pushed into the turn · ${fit(firstLine(entry.text), 72)}`)
     }
     if (steer.length > 0) $.ui.log(`queue: ${steer.length} too long for a tool result · goes when the turn ends`)
-    $.ui.invalidate('ui.render')
+    mark($)
     return context.length === (r.context?.length ?? 0) ? r : { ...r, context }
   })
 
@@ -693,7 +731,7 @@ export const register: Register = (on, options) => {
     if (e.element === `input:${editing.id}`) editFocused = true
     else if (editFocused) {
       editing = null
-      $.ui.invalidate('ui.render')
+      mark($)
     }
     return r
   })
@@ -708,7 +746,7 @@ export const register: Register = (on, options) => {
       stack = []
       steer = []
       editing = null
-      $.ui.invalidate('ui.render')
+      mark($)
       return { text: `queue: ${n} cleared` }
     }
     if (word === 'up' || word === 'down' || word === 'mv' || word === 'now' || word === 'rm' || word === 'edit') {
@@ -717,20 +755,20 @@ export const register: Register = (on, options) => {
       if (index === null) return { text: `queue: /q ${word} <n>${word === 'mv' ? ' <m>' : ''}, 1 to ${stack.length}` }
       if (word === 'rm') {
         removeAt(index)
-        $.ui.invalidate('ui.render')
+        mark($)
         return { text: `queue: ${index + 1} removed · ${stack.length} left` }
       }
       if (word === 'now') {
         const entry = stack[index]!
         const how = sendNow($, entry.id)
-        $.ui.invalidate('ui.render')
+        mark($)
         return { text: how === 'pushed' ? `queue: ${index + 1} goes into the turn` : `queue: ${index + 1} is first · sending` }
       }
       if (word !== 'edit') {
         const to = word === 'mv' ? indexArg(target) : index + (word === 'up' ? -1 : 1)
         if (to === null) return { text: `queue: /q mv <n> <m>, 1 to ${stack.length}` }
         if (!moveAt(index, to)) return { text: `queue: ${index + 1} is already ${to === index ? 'there' : to < 0 ? 'first' : 'last'}` }
-        $.ui.invalidate('ui.render')
+        mark($)
         return { text: `queue: ${index + 1} is now ${to + 1}` }
       }
       const entry = stack[index]!
@@ -748,7 +786,7 @@ export const register: Register = (on, options) => {
     if (word === 'help') return { text: 'queue: /q <text> · up <n> · down <n> · mv <n> <m> · now <n> · rm <n> · edit <n> · clear · send · status' }
     // anything else is the prompt to hold
     stack.push({ id: `e${++counter}`, text: e.args.trim(), at: Date.now() })
-    $.ui.invalidate('ui.render')
+    mark($)
     if (turnId) return { text: `queue: held · ${stack.length} waiting · sent when the turn ends` }
     if (inFlight > 0) return { text: `queue: held · ${stack.length} waiting · sent when the background work ends` }
     send($)
