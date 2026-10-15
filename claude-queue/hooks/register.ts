@@ -288,6 +288,18 @@ const isEcho = (raw: string): boolean => {
   return stack.some(entry => entry.at > Date.now() - ECHO_WINDOW_MS && entry.text.trim() === line)
 }
 
+// The typed `/q <text>` row is stored as a prompt line of the conversation,
+// so its content sits in history from the moment it is queued. Rewrite that
+// row while it is still held: the text shows nothing until the stack drains
+// and the plugin's own submit puts it in the transcript, where it belongs.
+const isHeldRow = (message: unknown): message is { role?: string; content?: unknown } => {
+  const m = message as { role?: string; content?: unknown }
+  if (!m || m.role !== 'user' || typeof m.content !== 'string') return false
+  const line = m.content.trim()
+  const stripped = line.replace(/^\/q\b/, '').trim()
+  return stripped !== line && stripped !== '' && stack.some(entry => entry.text.trim() === stripped)
+}
+
 // out of the stack only once the box has it: a fill the box turned down (a
 // dialog holds the keys) would otherwise lose the text
 const fillFrom = ($: EngineInterface, entry: Entry) =>
@@ -600,6 +612,18 @@ export const register: Register = (on, options) => {
     if (steer.length > 0) $.ui.log(`queue: ${steer.length} too long for a tool result · goes when the turn ends`)
     $.ui.invalidate('ui.render')
     return context.length === (r.context?.length ?? 0) ? r : { ...r, context }
+  })
+
+  // One row per stored conversation line: mask a held /q command while its
+  // entry waits in the stack. Display and storage only; the model never read
+  // this row anyway (the command was consumed by command.run, and the echo
+  // guard drops it if the engine ever queues it as a prompt).
+  on('session.append', async ($, e, next) => {
+    const m = e.message as { role?: string; content?: unknown }
+    if (isHeldRow(e.message)) {
+      return next({ ...e, message: { ...m, content: '/q ⏳ held · appears when sent' } })
+    }
+    return next(e)
   })
 
   // Enter is left to the engine. Only the turn id is read off it: a reload
